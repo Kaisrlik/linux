@@ -174,6 +174,13 @@ struct asix_rx_fixup_info {
 
 struct asix_common_private {
 	struct asix_rx_fixup_info rx_fixup_info;
+#ifdef CONFIG_NET_DSA
+	struct kobject kobj;
+	struct mii_bus *mdio;
+	int use_embphy;
+	bool dsa_up;
+	struct usbnet *dev;
+#endif
 };
 
 extern const struct driver_info ax88172a_info;
