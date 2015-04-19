@@ -290,4 +290,7 @@ static inline bool dsa_uses_tagged_protocol(struct dsa_switch_tree *dst)
 {
 	return dst->rcv != NULL;
 }
+
+int dsa_probe_mii(struct mii_bus *bus, struct net_device * dev);
+
 #endif

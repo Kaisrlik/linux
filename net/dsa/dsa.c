@@ -798,6 +798,127 @@ out:
 	return ret;
 }
 
+static int fill_platform_data(struct dsa_platform_data *pd,
+		struct mii_bus *bus, struct device * parent){
+	struct dsa_chip_data * cd;
+	int i;
+
+	static struct device_node dn = {
+		.name = "name",
+		.type = "type",
+		.phandle = 0,
+		.full_name = "fullname",
+		.fwnode =  {1},
+		.properties = NULL,
+		.deadprops = NULL,
+		.parent = NULL,
+		.child = NULL,
+		.sibling = NULL,
+		.kobj = {NULL},
+		._flags = 0,
+		.data = NULL
+	};
+	static struct device_node dnc = {
+		.name = "name",
+		.type = "type",
+		.phandle = 0,
+		.full_name = "fullname",
+		.fwnode =  {1},
+		.properties = NULL,
+		.deadprops = NULL,
+		.parent = &dn,
+		.child = NULL,
+		.sibling = NULL,
+		.kobj = {NULL},
+		._flags = 0,
+		.data = NULL
+	};
+	static char *port_names[12] = {"0", "1", "2", "3", "4",
+		"5", "6", "7", "8", "9", "10", "11"};
+
+	pd->nr_chips = 1;
+	pd->netdev = parent;
+
+	cd = kzalloc(sizeof(*cd), GFP_KERNEL);
+	if (cd == NULL)
+		return -ENOMEM;
+
+	pd->chip = cd;
+
+	cd->host_dev = parent;
+	cd->sw_addr = 0x10;
+	cd->eeprom_len = 256;
+	cd->of_node = &dn;
+	cd->rtable = 0;
+
+//	cd->of_node = kzalloc(sizeof(*cd->of_node), GFP_KERNEL);
+//	if(cd->of_node == NULL)
+//		goto free;
+
+	for (i = 0; i < DSA_MAX_PORTS; i++) {
+		cd->port_names[i] = port_names[i];
+		cd->port_dn[i] = &dnc;
+	}
+
+	return 0;
+
+//free:
+//	kfree(cd);
+//	return -ENOMEM;
+}
+
+int dsa_probe_mii(struct mii_bus *bus, struct net_device * dev)
+{
+	struct dsa_platform_data *pd;
+	struct dsa_switch_tree *dst;
+	int ret;
+
+	pr_notice_once("Distributed Switch Architecture driver version %s\n",
+		       dsa_driver_version);
+
+	if (dev == NULL || bus == NULL)
+		return -EINVAL;
+
+	pd = kzalloc(sizeof(*pd), GFP_KERNEL);
+	if (pd == NULL) {
+		ret = -ENOMEM;
+		goto freep;
+	}
+
+	ret = fill_platform_data(pd, bus, bus->parent); //TODO fix it!
+	if (ret)
+		goto freep;
+
+	if (dev->dsa_ptr != NULL) {
+		dev_put(dev);
+		ret = -EEXIST;
+		goto freep;
+	}
+
+	dst = kzalloc(sizeof(*dst), GFP_KERNEL);
+	if (dst == NULL) {
+		dev_put(dev);
+		ret = -ENOMEM;
+		goto freed;
+	}
+
+	dev_set_drvdata(bus->parent, dst);
+
+	dst->pd = pd;
+	dst->master_netdev = dev;
+
+	dsa_probe_common(dst, bus->parent);
+
+	return 0;
+
+freed:
+	kfree(dst);
+freep:
+	kfree(pd);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dsa_probe_mii);
+
 static int dsa_remove(struct platform_device *pdev)
 {
 	struct dsa_switch_tree *dst = platform_get_drvdata(pdev);
