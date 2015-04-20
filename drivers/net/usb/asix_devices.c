@@ -49,11 +49,14 @@
 
 static int mii_asix_read(struct mii_bus *bus, int phy_id, int regnum)
 {
-	return asix_mdio_read(((struct usbnet *)bus->priv)->net, phy_id, regnum);
+	int ret = asix_mdio_read(((struct usbnet *)bus->priv)->net, phy_id, regnum);
+	printk("ASIX_READ PHYID %x REGNUM %x RET %x\n", phy_id, regnum, ret);
+	return ret;
 }
 
 static int mii_asix_write(struct mii_bus *bus, int phy_id, int regnum, u16 val)
 {
+	printk("ASIX_WRITE PHYID %x REGNUM %x val %x\n", phy_id, regnum, val);
 	asix_mdio_write(((struct usbnet *)bus->priv)->net, phy_id, regnum, val);
 	return 0;
 }
@@ -539,6 +542,10 @@ static int ax88772_set_bind_dsa(struct asix_common_private *priv)
 
 	/* Enable RMII interface for external PHY */
 	asix_write_cmd(dev, AX_CMD_SW_PHY_SELECT, 0, 0, 1, &temp);
+	for (i = 0; i < 0x20; i++){
+		phyid = asix_mdio_read(dev->net, i, 0x3);
+		printk("REGS:0x%x:0x3 = %x\n", i, phyid);
+	}
 	for (i = 0; i < AX88772_MAX_PORTS; i++){
 		phyid = asix_mdio_read(dev->net, i, 0x3);
 		if (phyid == MV88e6065_ID)

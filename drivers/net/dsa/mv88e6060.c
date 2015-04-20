@@ -16,11 +16,15 @@
 #include <linux/phy.h>
 #include <net/dsa.h>
 
-#define REG_PORT(p)		(8 + (p))
-#define REG_GLOBAL		0x0f
+#define REG_PORT(p)		(0xd-(p))
+#define REG_X		0xd
+#define REG_PHY		0x1
+#define REG_GLOBAL		0xe
+#define REG_GLOBAL		0xf
 
 static int reg_read(struct dsa_switch *ds, int addr, int reg)
 {
+	printk("88e6060_read");
 	struct mii_bus *bus = dsa_host_dev_to_mii_bus(ds->master_dev);
 
 	if (bus == NULL)
@@ -42,6 +46,7 @@ static int reg_read(struct dsa_switch *ds, int addr, int reg)
 
 static int reg_write(struct dsa_switch *ds, int addr, int reg, u16 val)
 {
+	printk("88e6060_write");
 	struct mii_bus *bus = dsa_host_dev_to_mii_bus(ds->master_dev);
 
 	if (bus == NULL)
@@ -66,8 +71,9 @@ static char *mv88e6060_probe(struct device *host_dev, int sw_addr)
 
 	if (bus == NULL)
 		return NULL;
-
+	printk("MII_PROBE_CALL ");
 	ret = mdiobus_read(bus, sw_addr + REG_PORT(0), 0x03);
+	printk("mv 886060 probe %x", ret);
 	if (ret >= 0) {
 		if (ret == 0x0600)
 			return "Marvell 88E6060 (A0)";
@@ -75,13 +81,17 @@ static char *mv88e6060_probe(struct device *host_dev, int sw_addr)
 			return "Marvell 88E6060 (B0)";
 		if ((ret & 0xfff0) == 0x0600)
 			return "Marvell 88E6060";
+		if ((ret & 0xfff0) == 0x0650)
+			return "Marvell 88E6065";
 	}
 
 	return NULL;
 }
 
+//OK
 static int mv88e6060_switch_reset(struct dsa_switch *ds)
 {
+	printk("Switch reset \n");
 	int i;
 	int ret;
 	unsigned long timeout;
@@ -110,23 +120,25 @@ static int mv88e6060_switch_reset(struct dsa_switch *ds)
 	if (time_after(jiffies, timeout))
 		return -ETIMEDOUT;
 
+	printk("Switch reset END\n");
 	return 0;
 }
 
+//TODO nastaveni pro firmu jinak OK.
 static int mv88e6060_setup_global(struct dsa_switch *ds)
 {
 	/* Disable discarding of frames with excessive collisions,
 	 * set the maximum frame size to 1536 bytes, and mask all
 	 * interrupt sources.
 	 */
-	REG_WRITE(REG_GLOBAL, 0x04, 0x0800);
+//	REG_WRITE(REG_GLOBAL, 0x04, 0x0800);
+	REG_WRITE(REG_GLOBAL, 0x04, 0x0000);
 
 	/* Enable automatic address learning, set the address
 	 * database size to 1024 entries, and set the default aging
 	 * time to 5 minutes.
 	 */
 	REG_WRITE(REG_GLOBAL, 0x0a, 0x2130);
-
 	return 0;
 }
 
@@ -134,22 +146,32 @@ static int mv88e6060_setup_port(struct dsa_switch *ds, int p)
 {
 	int addr = REG_PORT(p);
 
+	printk("SETUP_PORRT\n");
+	/* MAC Forcing register: don't force link, speed, duplex
+	 * or flow control state to any particular values on physical
+	 * ports, but force the CPU port and all DSA ports to 100Mb/s and full duplex.
+	 */
+	REG_WRITE(addr, 0x01, 0x003d);
 	/* Do not force flow control, disable Ingress and Egress
 	 * Header tagging, disable VLAN tunneling, and set the port
 	 * state to Forwarding.  Additionally, if this is the CPU
 	 * port, enable Ingress and Egress Trailer tagging mode.
 	 */
-	REG_WRITE(addr, 0x04, dsa_is_cpu_port(ds, p) ?  0x4103 : 0x0003);
+	REG_WRITE(addr, 0x04, 0x0003);
+	//recompute crc
+	//REG_WRITE(addr, 0x04, dsa_is_cpu_port(ds, p) ?  0x103 : 0x0003);
 
 	/* Port based VLAN map: give each port its own address
 	 * database, allow the CPU port to talk to each of the 'real'
 	 * ports, and allow each of the 'real' ports to only talk to
 	 * the CPU port.
 	 */
+	//TODO
+
 	REG_WRITE(addr, 0x06,
 			((p & 0xf) << 12) |
 			 (dsa_is_cpu_port(ds, p) ?
-				ds->phys_port_mask :
+				ds->phys_port_mask : //TODO port mas neni nsataven
 				(1 << ds->dst->cpu_port)));
 
 	/* Port Association Vector: when learning source addresses
@@ -157,6 +179,7 @@ static int mv88e6060_setup_port(struct dsa_switch *ds, int p)
 	 * a port bitmap that has only the bit for this port set and
 	 * the other bits clear.
 	 */
+	//TODO neni
 	REG_WRITE(addr, 0x0b, 1 << p);
 
 	return 0;
@@ -164,6 +187,7 @@ static int mv88e6060_setup_port(struct dsa_switch *ds, int p)
 
 static int mv88e6060_setup(struct dsa_switch *ds)
 {
+	printk("mv 60606 setup\n");
 	int i;
 	int ret;
 
@@ -183,6 +207,7 @@ static int mv88e6060_setup(struct dsa_switch *ds)
 			return ret;
 	}
 
+	printk("mv 60606 setup end\n");
 	return 0;
 }
 
@@ -204,6 +229,7 @@ static int mv88e6060_port_to_phy_addr(int port)
 
 static int mv88e6060_phy_read(struct dsa_switch *ds, int port, int regnum)
 {
+	printk("88e60606PHY_READ ");
 	int addr;
 
 	addr = mv88e6060_port_to_phy_addr(port);
@@ -216,6 +242,7 @@ static int mv88e6060_phy_read(struct dsa_switch *ds, int port, int regnum)
 static int
 mv88e6060_phy_write(struct dsa_switch *ds, int port, int regnum, u16 val)
 {
+	printk("88e60606PHY_WRIT ");
 	int addr;
 
 	addr = mv88e6060_port_to_phy_addr(port);
@@ -228,7 +255,7 @@ mv88e6060_phy_write(struct dsa_switch *ds, int port, int regnum, u16 val)
 static void mv88e6060_poll_link(struct dsa_switch *ds)
 {
 	int i;
-
+//	printk("Poll link TODO jiny addrspace\n");
 	for (i = 0; i < DSA_MAX_PORTS; i++) {
 		struct net_device *dev;
 		int uninitialized_var(port_status);
@@ -273,6 +300,17 @@ static void mv88e6060_poll_link(struct dsa_switch *ds)
 	}
 }
 
+static int mv88e6065_port_enable(struct dsa_switch *ds, int port, int regnum){
+	printk("My_PORT_ENABLE!!!");
+	return 0;
+}
+
+static int mv88e6065_port_disable(struct dsa_switch *ds, int port, int regnum){
+	printk("My_PORT_DISABLE!!!");
+	return 0;
+}
+
+
 static struct dsa_switch_driver mv88e6060_switch_driver = {
 	.tag_protocol	= DSA_TAG_PROTO_TRAILER,
 	.probe		= mv88e6060_probe,
@@ -281,6 +319,8 @@ static struct dsa_switch_driver mv88e6060_switch_driver = {
 	.phy_read	= mv88e6060_phy_read,
 	.phy_write	= mv88e6060_phy_write,
 	.poll_link	= mv88e6060_poll_link,
+	.port_enable	 = mv88e6065_port_enable,
+	.port_disable	 = mv88e6065_port_disable,
 };
 
 static int __init mv88e6060_init(void)
