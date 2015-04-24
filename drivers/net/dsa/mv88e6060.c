@@ -20,7 +20,7 @@
 #define REG_X		0xd
 #define REG_PHY		0x1
 #define REG_GLOBAL		0xe
-#define REG_GLOBAL		0xf
+#define REG_GLOBAL2		0xf
 
 static int reg_read(struct dsa_switch *ds, int addr, int reg)
 {
@@ -138,7 +138,15 @@ static int mv88e6060_setup_global(struct dsa_switch *ds)
 	 * database size to 1024 entries, and set the default aging
 	 * time to 5 minutes.
 	 */
+
+	
 	REG_WRITE(REG_GLOBAL, 0x0a, 0x2130);
+	
+	
+	
+	REG_WRITE(REG_GLOBAL, 0x07, 0x0003);
+	REG_WRITE(REG_GLOBAL, 0x08, 0x0003);
+	
 	return 0;
 }
 
@@ -167,20 +175,24 @@ static int mv88e6060_setup_port(struct dsa_switch *ds, int p)
 	 * the CPU port.
 	 */
 	//TODO
-
+/*
 	REG_WRITE(addr, 0x06,
 			((p & 0xf) << 12) |
 			 (dsa_is_cpu_port(ds, p) ?
 				ds->phys_port_mask : //TODO port mas neni nsataven
 				(1 << ds->dst->cpu_port)));
-
+*/
 	/* Port Association Vector: when learning source addresses
 	 * of packets, add the address to the address database using
 	 * a port bitmap that has only the bit for this port set and
 	 * the other bits clear.
 	 */
 	//TODO neni
-	REG_WRITE(addr, 0x0b, 1 << p);
+//	REG_WRITE(addr, 0x0b, 1 << p);
+
+
+
+	REG_WRITE(addr, 0x04, 0x100f);
 
 	return 0;
 }
@@ -254,7 +266,7 @@ mv88e6060_phy_write(struct dsa_switch *ds, int port, int regnum, u16 val)
 
 static void mv88e6060_poll_link(struct dsa_switch *ds)
 {
-	int i;
+	int i, j, temp;
 //	printk("Poll link TODO jiny addrspace\n");
 	for (i = 0; i < DSA_MAX_PORTS; i++) {
 		struct net_device *dev;
@@ -270,7 +282,13 @@ static void mv88e6060_poll_link(struct dsa_switch *ds)
 
 		link = 0;
 		if (dev->flags & IFF_UP) {
-			port_status = reg_read(ds, REG_PORT(i), 0x00);
+			port_status = reg_read(ds, i, 0x00);
+
+			for (j = 0; j < 6; j++) {
+				 temp = reg_read(ds, 0x8 + j, 0x10);
+				 temp = reg_read(ds, j, 0x10);
+			}
+
 			if (port_status < 0)
 				continue;
 
@@ -300,13 +318,33 @@ static void mv88e6060_poll_link(struct dsa_switch *ds)
 	}
 }
 
-static int mv88e6065_port_enable(struct dsa_switch *ds, int port, int regnum){
-	printk("My_PORT_ENABLE!!!");
+static int mv88e6065_port_enable(struct dsa_switch *ds, int port, struct phy_device *phy){
+	printk("My_PORT_ENABLE!!!\n");
+	int i, x;
+	/*
+	for(i = 0; i < 6; i++){
+		REG_WRITE(0xd - i, 0x04, 0x000d);
+		x = REG_READ(0xd - i, 0x00);
+		printk("PORT%x : reg0 = %x\n",0x1d-i, x);
+	}
+	*/
+	for(i = 0; i < 5; i++){
+//		REG_WRITE(0x11 + i, 0x00, 0x6100); //PHY reg 100MB full, port normal noaneg
+		REG_WRITE(i, 0x04, 0x01e1); //PHY reg 100MB full, port normal aneg
+		REG_WRITE(i, 0x00, 0x3300); //PHY reg 100MB full, port normal aneg
+	}
+
+/*
+	for(i = 0; i < 6; i++){
+		x = REG_READ(0xd - i, 0x00);
+		printk("2PORT%x : reg0 = %x\n",0x1d-i, x);
+	}
+	*/
 	return 0;
 }
 
-static int mv88e6065_port_disable(struct dsa_switch *ds, int port, int regnum){
-	printk("My_PORT_DISABLE!!!");
+static int mv88e6065_port_disable(struct dsa_switch *ds, int port, struct phy_device *phy){
+	REG_WRITE(port, 0x00, 0x0800); //PHY reg 100MB full, port normal aneg
 	return 0;
 }
 

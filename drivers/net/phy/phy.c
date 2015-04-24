@@ -436,6 +436,8 @@ int phy_start_aneg(struct phy_device *phydev)
 
 	mutex_lock(&phydev->lock);
 
+	printk("WHO calls TIHS SHIT %s\n", phydev->drv->name);
+
 	if (AUTONEG_DISABLE == phydev->autoneg)
 		phy_sanitize_settings(phydev);
 

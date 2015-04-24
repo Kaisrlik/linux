@@ -578,6 +578,8 @@ int phy_attach_direct(struct net_device *dev, struct phy_device *phydev,
 	struct module *bus_module;
 	int err;
 
+	printk("phy_attach_direct()");
+
 	/* Assume that if there is no driver, that it doesn't
 	 * exist, and we should use the genphy driver.
 	 */
@@ -1368,6 +1370,7 @@ static struct phy_driver genphy_driver[] = {
 static int __init phy_init(void)
 {
 	int rc;
+	printk("PHY_INIT()\n");
 
 	rc = mdio_bus_init();
 	if (rc)

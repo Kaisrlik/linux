@@ -31,6 +31,7 @@ static int dsa_slave_phy_read(struct mii_bus *bus, int addr, int reg)
 static int dsa_slave_phy_write(struct mii_bus *bus, int addr, int reg, u16 val)
 {
 	printk("SLAVEDSA_WRITE ");
+		BUG_ON(val == 0xfbff);
 	struct dsa_switch *ds = bus->priv;
 
 	if (ds->phys_mii_mask & (1 << addr))
@@ -709,6 +710,8 @@ dsa_slave_create(struct dsa_switch *ds, struct device *parent,
 	}
 
 	netif_carrier_off(slave_dev);
+
+	p->phy = NULL;
 
 	if (p->phy != NULL) {
 		if (ds->drv->get_phy_flags)
