@@ -172,6 +172,12 @@ struct asix_rx_fixup_info {
 	bool split_head;
 };
 
+#ifdef CONFIG_NET_DSA
+
+#include <net/dsa.h>
+
+#endif
+
 struct asix_common_private {
 	struct asix_rx_fixup_info rx_fixup_info;
 #ifdef CONFIG_NET_DSA
@@ -180,6 +186,7 @@ struct asix_common_private {
 	int use_embphy;
 	bool dsa_up;
 	struct usbnet *dev;
+	struct platform_device *pdev;
 #endif
 };
 

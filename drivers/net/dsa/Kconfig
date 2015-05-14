@@ -13,6 +13,15 @@ config NET_DSA_MV88E6060
 	  This enables support for the Marvell 88E6060 ethernet switch
 	  chip.
 
+config NET_DSA_MV88E6065
+	tristate "Marvell 88E6065 ethernet switch chip support"
+	select NET_DSA
+	select NET_DSA_TAG_TRAILER
+	select NET_DSA_MV88E6XXX
+	---help---
+	  This enables support for the Marvell 88E6065 ethernet switch
+	  chip.
+
 config NET_DSA_MV88E6XXX_NEED_PPU
 	bool
 	default n

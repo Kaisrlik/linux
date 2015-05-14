@@ -19,6 +19,7 @@
 #include <linux/phy.h>
 #include <linux/phy_fixed.h>
 #include <linux/ethtool.h>
+#include <linux/platform_device.h>
 
 enum dsa_tag_protocol {
 	DSA_TAG_PROTO_NONE = 0,
@@ -291,6 +292,7 @@ static inline bool dsa_uses_tagged_protocol(struct dsa_switch_tree *dst)
 	return dst->rcv != NULL;
 }
 
-int dsa_probe_mii(struct mii_bus *bus, struct net_device * dev);
+int dsa_probe2(struct platform_device *pdev, struct net_device *dev);
+int dsa_remove(struct platform_device *pdev);
 
 #endif

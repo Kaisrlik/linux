@@ -42,7 +42,6 @@
 #define MV88e6065_ID  0x0c89
 
 #include <linux/phy.h>
-#include <net/dsa.h>
 
 #define to_asix_obj(x) container_of(x, struct asix_common_private, kobj)
 #define to_asix_attr(x) container_of(x, struct asix_attribute, attr)
@@ -50,13 +49,11 @@
 static int mii_asix_read(struct mii_bus *bus, int phy_id, int regnum)
 {
 	int ret = asix_mdio_read(((struct usbnet *)bus->priv)->net, phy_id, regnum);
-	printk("ASIX_READ PHYID %x REGNUM %x RET %x\n", phy_id, regnum, ret);
 	return ret;
 }
 
 static int mii_asix_write(struct mii_bus *bus, int phy_id, int regnum, u16 val)
 {
-	printk("ASIX_WRITE PHYID %x REGNUM %x val %x\n", phy_id, regnum, val);
 	asix_mdio_write(((struct usbnet *)bus->priv)->net, phy_id, regnum, val);
 	return 0;
 }
@@ -109,13 +106,10 @@ static void ax88772_remove_mdio(struct usbnet *dev)
 {
 	struct asix_common_private *priv = dev->driver_priv;
 
-//	dsa_free(); TODO
-
 	netdev_info(dev->net, "deregistering mdio bus %s\n", priv->mdio->id);
 	mdiobus_unregister(priv->mdio);
 	kfree(priv->mdio->irq);
 	mdiobus_free(priv->mdio);
-	kfree(priv);
 }
 
 #endif
@@ -383,7 +377,7 @@ static int ax88772_link_reset(struct usbnet *dev)
 static int ax88772_reset(struct usbnet *dev)
 {
 	struct asix_data *data = (struct asix_data *)&dev->data;
-	int ret, embd_phy;
+	int ret, embd_phy = 0;
 	u16 rx_ctl;
 
 #ifdef CONFIG_NET_DSA
@@ -403,7 +397,7 @@ static int ax88772_reset(struct usbnet *dev)
 
 		asix_write_rx_ctl(dev, 0);
 		msleep(60);
-   }
+   }else{
 
 #endif
 
@@ -420,6 +414,9 @@ static int ax88772_reset(struct usbnet *dev)
 		goto out;
 	}
 
+#ifdef CONFIG_NET_DSA
+	}
+#endif
 	ret = asix_sw_reset(dev, AX_SWRESET_IPPD | AX_SWRESET_PRL);
 	if (ret < 0)
 		goto out;
@@ -529,6 +526,100 @@ struct asix_attribute {
 	ssize_t (*store)(struct asix_common_private *priv, struct asix_attribute *attr, const char *buf, size_t count);
 };
 
+static int fill_platform_datax(struct dsa_platform_data *pd,
+		struct mii_bus *bus, struct device * parent){
+	struct dsa_chip_data * cd;
+	int i;
+
+	static struct device_node dn = {
+		.name = "name",
+		.type = "type",
+		.phandle = 0,
+		.full_name = "fullname",
+		.fwnode =  {1},
+		.properties = NULL,
+		.deadprops = NULL,
+		.parent = NULL,
+		.child = NULL,
+		.sibling = NULL,
+		.kobj = {NULL},
+		._flags = 0,
+		.data = NULL
+	};
+	static struct device_node dnc = {
+		.name = "name",
+		.type = "type",
+		.phandle = 0,
+		.full_name = "fullname",
+		.fwnode =  {1},
+		.properties = NULL,
+		.deadprops = NULL,
+		.parent = &dn,
+		.child = NULL,
+		.sibling = NULL,
+		.kobj = {NULL},
+		._flags = 0,
+		.data = NULL
+	};
+	static char *port_names[12] = {"0", "1", "2", "3", "4",
+		"5", "6", "7", "8", "9", "10", "11"};
+
+	pd->nr_chips = 1;
+	pd->netdev = parent;
+
+	cd = kzalloc(sizeof(*cd), GFP_KERNEL);
+	if (cd == NULL)
+		return -ENOMEM;
+
+	pd->chip = cd;
+
+	cd->host_dev = parent;
+	cd->sw_addr = 0x10;
+	cd->eeprom_len = 256;
+	cd->of_node = &dn;
+	cd->rtable = 0;
+
+//	cd->of_node = kzalloc(sizeof(*cd->of_node), GFP_KERNEL);
+//	if(cd->of_node == NULL)
+//		goto free;
+
+	for (i = 0; i < DSA_MAX_PORTS; i++) {
+		cd->port_names[i] = port_names[i];
+		cd->port_dn[i] = &dnc;
+	}
+
+	return 0;
+
+//free:
+//	kfree(cd);
+//	return -ENOMEM;
+}
+
+static struct platform_device *dsa_create_pdev(struct mii_bus *bus, struct net_device *dev){
+	struct dsa_platform_data *pd;
+	int ret;
+	struct platform_device *pdev = platform_device_register_simple("MYTEMP", 0x42, NULL, 0);
+
+	pd = kzalloc(sizeof(*pd), GFP_KERNEL);
+	if (pd == NULL)
+		goto freex;
+	ret = fill_platform_datax(pd, bus, bus->parent);
+	if (ret != 0)
+		goto freepx;
+
+	pdev->dev.of_node = NULL;
+//	pd->netdev = &dev->dev;
+	pd->netdev = bus->parent;
+	pdev->dev.platform_data = pd;
+	return pdev;
+
+freepx:
+	kfree(pd);
+freex:
+	platform_device_unregister(pdev);
+	return NULL;
+}
+
 static int ax88772_set_bind_dsa(struct asix_common_private *priv)
 {
 	struct usbnet *dev = priv->dev;
@@ -542,10 +633,7 @@ static int ax88772_set_bind_dsa(struct asix_common_private *priv)
 
 	/* Enable RMII interface for external PHY */
 	asix_write_cmd(dev, AX_CMD_SW_PHY_SELECT, 0, 0, 1, &temp);
-	for (i = 0; i < 0x20; i++){
-		phyid = asix_mdio_read(dev->net, i, 0x3);
-		printk("REGS:0x%x:0x3 = %x\n", i, phyid);
-	}
+
 	for (i = 0; i < AX88772_MAX_PORTS; i++){
 		phyid = asix_mdio_read(dev->net, i, 0x3);
 		if (phyid == MV88e6065_ID)
@@ -557,12 +645,16 @@ static int ax88772_set_bind_dsa(struct asix_common_private *priv)
 		if (ret)
 			return ret;
 
-		ret = asix_read_cmd(dev, AX_CMD_SW_PHY_STATUS, 0, 0, 1, &priv->use_embphy);
 		priv->use_embphy = 1;
-		ret = dsa_probe_mii(priv->mdio, dev->net);
+
+		priv->pdev = dsa_create_pdev(priv->mdio, dev->net);
+		if (priv->pdev == NULL)
+			return -ENOMEM;
+
+		ret = dsa_probe2(priv->pdev, dev->net);
 		if (ret)
 			return ret;
-
+		
 		dev->mii.phy_id = 0x11; //TODO load addr of mii reg
 	}else{
 		/* Revert to previous settings */
@@ -592,8 +684,8 @@ static ssize_t usb_dsa_show(struct asix_common_private *priv,
 
 static void driver_release(struct kobject *kobj)
 {
-	pr_debug("driver: '%s': %s\n", kobject_name(kobj), __func__);
-//   kfree(drv_priv); TODO free
+	struct asix_common_private *priv = to_asix_obj(kobj);
+	kfree(priv);
 }
 
 static ssize_t usb_dsa_attr_show(struct kobject *kobj,
@@ -727,6 +819,7 @@ static int ax88772_bind(struct usbnet *dev, struct usb_interface *intf)
 		dev->rx_urb_size = 2048;
 	}
 
+	ax88772_set_bind_dsa(priv);
 	return 0;
 
 #ifdef CONFIG_NET_DSA
@@ -740,9 +833,15 @@ free:
 
 static void ax88772_unbind(struct usbnet *dev, struct usb_interface *intf)
 {
+	struct asix_common_private *priv = (struct asix_common_private *)dev->driver_priv;
 #ifdef CONFIG_NET_DSA
-	if (((struct asix_common_private *)dev->driver_priv)->dsa_up == 1)
+	if (priv->dsa_up == 1){
+		dsa_remove(priv->pdev);
 	   ax88772_remove_mdio(dev);
+		platform_device_unregister(priv->pdev);
+		kset_unregister(priv->kobj.kset);
+		kobject_put(&priv->kobj);
+	}else
 #endif
 	kfree(dev->driver_priv);
 }

@@ -23,6 +23,8 @@
 #include <linux/sysfs.h>
 #include "dsa_priv.h"
 
+#include <linux/phy.h>
+
 char dsa_driver_version[] = "0.1";
 
 
@@ -365,6 +367,19 @@ out:
 
 static void dsa_switch_destroy(struct dsa_switch *ds)
 {
+	int i;
+//	for (i = 0; i < DSA_MAX_SWITCHES; i++) {
+//		if (ds->ports[i] == NULL)
+//			continue;
+	for (i = 0; i < 5; i++) {
+		struct dsa_slave_priv *p = netdev_priv(ds->ports[i]);
+		if (p->phy != NULL)
+			phy_disconnect(p->phy);
+		unregister_netdev(ds->ports[i]);
+	}
+	mdiobus_unregister(ds->slave_mii_bus);
+	kfree(ds->slave_mii_bus->irq);
+	mdiobus_free(ds->slave_mii_bus);
 #ifdef CONFIG_NET_DSA_HWMON
 	if (ds->hwmon_dev)
 		hwmon_device_unregister(ds->hwmon_dev);
@@ -423,6 +438,8 @@ static void dsa_link_poll_work(struct work_struct *ugly)
 	struct dsa_switch_tree *dst;
 	int i;
 
+	mutex_lock(&dsa_switch_drivers_mutex);
+
 	dst = container_of(ugly, struct dsa_switch_tree, link_poll_work);
 
 	for (i = 0; i < dst->pd->nr_chips; i++) {
@@ -433,6 +450,8 @@ static void dsa_link_poll_work(struct work_struct *ugly)
 	}
 
 	mod_timer(&dst->link_poll_timer, round_jiffies(jiffies + HZ));
+
+	mutex_unlock(&dsa_switch_drivers_mutex);
 }
 
 static void dsa_link_poll_timer(unsigned long _dst)
@@ -744,7 +763,55 @@ static int dsa_probe_common(struct dsa_switch_tree *dst, struct device *parent)
 
 }
 
-static int dsa_probe(struct platform_device *pdev){
+int dsa_probe2(struct platform_device *pdev, struct net_device *dev){
+	struct dsa_platform_data *pd = pdev->dev.platform_data;
+	struct dsa_switch_tree *dst;
+	int ret;
+
+	pr_notice_once("V2 !!!!! Distributed Switch Architecture driver version %s\n",
+		       dsa_driver_version);
+
+	if (pdev->dev.of_node) {
+		ret = dsa_of_probe(pdev);
+		if (ret)
+			return ret;
+
+		pd = pdev->dev.platform_data;
+	}
+
+	if (pd == NULL || pd->netdev == NULL)
+		return -EINVAL;
+	
+	if (dev->dsa_ptr != NULL) {
+		dev_put(dev);
+		ret = -EEXIST;
+		goto out;
+	}
+
+	dst = kzalloc(sizeof(*dst), GFP_KERNEL);
+	if (dst == NULL) {
+		dev_put(dev);
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	platform_set_drvdata(pdev, dst);
+
+	dst->pd = pd;
+	dst->master_netdev = dev;
+
+	dsa_probe_common(dst, &pdev->dev);
+
+	return 0;
+
+out:
+	dsa_of_remove(pdev);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dsa_probe2);
+
+int dsa_probe(struct platform_device *pdev){
 	struct dsa_platform_data *pd = pdev->dev.platform_data;
 	struct net_device *dev;
 	struct dsa_switch_tree *dst;
@@ -797,132 +864,15 @@ out:
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(dsa_probe);
 
-static int fill_platform_data(struct dsa_platform_data *pd,
-		struct mii_bus *bus, struct device * parent){
-	struct dsa_chip_data * cd;
-	int i;
 
-	static struct device_node dn = {
-		.name = "name",
-		.type = "type",
-		.phandle = 0,
-		.full_name = "fullname",
-		.fwnode =  {1},
-		.properties = NULL,
-		.deadprops = NULL,
-		.parent = NULL,
-		.child = NULL,
-		.sibling = NULL,
-		.kobj = {NULL},
-		._flags = 0,
-		.data = NULL
-	};
-	static struct device_node dnc = {
-		.name = "name",
-		.type = "type",
-		.phandle = 0,
-		.full_name = "fullname",
-		.fwnode =  {1},
-		.properties = NULL,
-		.deadprops = NULL,
-		.parent = &dn,
-		.child = NULL,
-		.sibling = NULL,
-		.kobj = {NULL},
-		._flags = 0,
-		.data = NULL
-	};
-	static char *port_names[12] = {"0", "1", "2", "3", "4",
-		"5", "6", "7", "8", "9", "10", "11"};
-
-	pd->nr_chips = 1;
-	pd->netdev = parent;
-
-	cd = kzalloc(sizeof(*cd), GFP_KERNEL);
-	if (cd == NULL)
-		return -ENOMEM;
-
-	pd->chip = cd;
-
-	cd->host_dev = parent;
-	cd->sw_addr = 0x10;
-	cd->eeprom_len = 256;
-	cd->of_node = &dn;
-	cd->rtable = 0;
-
-//	cd->of_node = kzalloc(sizeof(*cd->of_node), GFP_KERNEL);
-//	if(cd->of_node == NULL)
-//		goto free;
-
-	for (i = 0; i < DSA_MAX_PORTS; i++) {
-		cd->port_names[i] = port_names[i];
-		cd->port_dn[i] = &dnc;
-	}
-
-	return 0;
-
-//free:
-//	kfree(cd);
-//	return -ENOMEM;
-}
-
-int dsa_probe_mii(struct mii_bus *bus, struct net_device * dev)
-{
-	struct dsa_platform_data *pd;
-	struct dsa_switch_tree *dst;
-	int ret;
-
-	pr_notice_once("Distributed Switch Architecture driver version %s\n",
-		       dsa_driver_version);
-
-	if (dev == NULL || bus == NULL)
-		return -EINVAL;
-
-	pd = kzalloc(sizeof(*pd), GFP_KERNEL);
-	if (pd == NULL) {
-		ret = -ENOMEM;
-		goto freep;
-	}
-
-	ret = fill_platform_data(pd, bus, bus->parent); //TODO fix it!
-	if (ret)
-		goto freep;
-
-	if (dev->dsa_ptr != NULL) {
-		dev_put(dev);
-		ret = -EEXIST;
-		goto freep;
-	}
-
-	dst = kzalloc(sizeof(*dst), GFP_KERNEL);
-	if (dst == NULL) {
-		dev_put(dev);
-		ret = -ENOMEM;
-		goto freed;
-	}
-
-	dev_set_drvdata(bus->parent, dst);
-
-	dst->pd = pd;
-	dst->master_netdev = dev;
-
-	dsa_probe_common(dst, bus->parent);
-
-	return 0;
-
-freed:
-	kfree(dst);
-freep:
-	kfree(pd);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(dsa_probe_mii);
-
-static int dsa_remove(struct platform_device *pdev)
+int dsa_remove(struct platform_device *pdev)
 {
 	struct dsa_switch_tree *dst = platform_get_drvdata(pdev);
 	int i;
+	
+	mutex_lock(&dsa_switch_drivers_mutex);
 
 	if (dst->link_poll_needed)
 		del_timer_sync(&dst->link_poll_timer);
@@ -935,11 +885,14 @@ static int dsa_remove(struct platform_device *pdev)
 		if (ds != NULL)
 			dsa_switch_destroy(ds);
 	}
-
+	
 	dsa_of_remove(pdev);
+
+	mutex_unlock(&dsa_switch_drivers_mutex);
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(dsa_remove);
 
 static void dsa_shutdown(struct platform_device *pdev)
 {

@@ -19,7 +19,6 @@
 /* slave mii_bus handling ***************************************************/
 static int dsa_slave_phy_read(struct mii_bus *bus, int addr, int reg)
 {
-	printk("SLAVEDSA_READ ");
 	struct dsa_switch *ds = bus->priv;
 
 	if (ds->phys_mii_mask & (1 << addr))
@@ -30,8 +29,6 @@ static int dsa_slave_phy_read(struct mii_bus *bus, int addr, int reg)
 
 static int dsa_slave_phy_write(struct mii_bus *bus, int addr, int reg, u16 val)
 {
-	printk("SLAVEDSA_WRITE ");
-		BUG_ON(val == 0xfbff);
 	struct dsa_switch *ds = bus->priv;
 
 	if (ds->phys_mii_mask & (1 << addr))
@@ -42,7 +39,6 @@ static int dsa_slave_phy_write(struct mii_bus *bus, int addr, int reg, u16 val)
 
 void dsa_slave_mii_bus_init(struct dsa_switch *ds)
 {
-	printk("mii bus init\n");
 	ds->slave_mii_bus->priv = (void *)ds;
 	ds->slave_mii_bus->name = "dsa slave smi";
 	ds->slave_mii_bus->read = dsa_slave_phy_read;
@@ -57,7 +53,6 @@ void dsa_slave_mii_bus_init(struct dsa_switch *ds)
 /* slave device handling ****************************************************/
 static int dsa_slave_init(struct net_device *dev)
 {
-	printk("netdev init\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 
 	dev->iflink = p->parent->dst->master_netdev->ifindex;
@@ -67,7 +62,6 @@ static int dsa_slave_init(struct net_device *dev)
 
 static int dsa_slave_open(struct net_device *dev)
 {
-	printk("netdev open my_net_device %x\n", dev);
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct net_device *master = p->parent->dst->master_netdev;
 	struct dsa_switch *ds = p->parent;
@@ -77,27 +71,23 @@ static int dsa_slave_open(struct net_device *dev)
 		return -ENETDOWN;
 
 	if (!ether_addr_equal(dev->dev_addr, master->dev_addr)) {
-		printk("T ethaddr equal\n");
 		err = dev_uc_add(master, dev->dev_addr);
 		if (err < 0)
 			goto out;
 	}
 
 	if (dev->flags & IFF_ALLMULTI) {
-		printk("IFF all multi\n");
 		err = dev_set_allmulti(master, 1);
 		if (err < 0)
 			goto del_unicast;
 	}
 	if (dev->flags & IFF_PROMISC) {
-		printk("IFF promisc\n");
 		err = dev_set_promiscuity(master, 1);
 		if (err < 0)
 			goto clear_allmulti;
 	}
 
 	if (ds->drv->port_enable) {
-		printk("Port E\n");
 		err = ds->drv->port_enable(ds, p->port, p->phy);
 		if (err)
 			goto clear_promisc;
@@ -106,7 +96,6 @@ static int dsa_slave_open(struct net_device *dev)
 	if (p->phy)
 		phy_start(p->phy);
 
-	printk("END netdev open my_net_device %x\n", dev);
 	return 0;
 
 clear_promisc:
@@ -124,7 +113,6 @@ out:
 
 static int dsa_slave_close(struct net_device *dev)
 {
-	printk("netdev get close\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct net_device *master = p->parent->dst->master_netdev;
 	struct dsa_switch *ds = p->parent;
@@ -150,7 +138,6 @@ static int dsa_slave_close(struct net_device *dev)
 
 static void dsa_slave_change_rx_flags(struct net_device *dev, int change)
 {
-	printk("netdev change rx flags\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct net_device *master = p->parent->dst->master_netdev;
 
@@ -162,7 +149,6 @@ static void dsa_slave_change_rx_flags(struct net_device *dev, int change)
 
 static void dsa_slave_set_rx_mode(struct net_device *dev)
 {
-	printk("netdev set rx flags\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct net_device *master = p->parent->dst->master_netdev;
 
@@ -172,7 +158,6 @@ static void dsa_slave_set_rx_mode(struct net_device *dev)
 
 static int dsa_slave_set_mac_address(struct net_device *dev, void *a)
 {
-	printk("inetdev getmac\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct net_device *master = p->parent->dst->master_netdev;
 	struct sockaddr *addr = a;
@@ -201,7 +186,6 @@ out:
 
 static int dsa_slave_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 {
-	printk("netdev ioctl\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 
 	if (p->phy != NULL)
@@ -212,7 +196,6 @@ static int dsa_slave_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 
 static netdev_tx_t dsa_slave_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	printk("netdev xmit\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 
 	return p->xmit(skb, dev);
@@ -221,7 +204,6 @@ static netdev_tx_t dsa_slave_xmit(struct sk_buff *skb, struct net_device *dev)
 static netdev_tx_t dsa_slave_notag_xmit(struct sk_buff *skb,
 					struct net_device *dev)
 {
-	printk("netdev notag xmit\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 
 	skb->dev = p->parent->dst->master_netdev;
@@ -235,7 +217,6 @@ static netdev_tx_t dsa_slave_notag_xmit(struct sk_buff *skb,
 static int
 dsa_slave_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
-	printk("ethtool get_slave_sett\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	int err;
 
@@ -252,7 +233,6 @@ dsa_slave_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 static int
 dsa_slave_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
-	printk("ethtool set_slave_sett\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 
 	if (p->phy != NULL)
@@ -264,7 +244,6 @@ dsa_slave_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 static void dsa_slave_get_drvinfo(struct net_device *dev,
 				  struct ethtool_drvinfo *drvinfo)
 {
-	printk("ethtool getdrvinfo\n");
 	strlcpy(drvinfo->driver, "dsa", sizeof(drvinfo->driver));
 	strlcpy(drvinfo->version, dsa_driver_version, sizeof(drvinfo->version));
 	strlcpy(drvinfo->fw_version, "N/A", sizeof(drvinfo->fw_version));
@@ -273,7 +252,6 @@ static void dsa_slave_get_drvinfo(struct net_device *dev,
 
 static int dsa_slave_get_regs_len(struct net_device *dev)
 {
-	printk("ethtool reg len\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -286,7 +264,6 @@ static int dsa_slave_get_regs_len(struct net_device *dev)
 static void
 dsa_slave_get_regs(struct net_device *dev, struct ethtool_regs *regs, void *_p)
 {
-	printk("ethtool get_regs\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -296,7 +273,6 @@ dsa_slave_get_regs(struct net_device *dev, struct ethtool_regs *regs, void *_p)
 
 static int dsa_slave_nway_reset(struct net_device *dev)
 {
-	printk("ethtool nwayreset\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 
 	if (p->phy != NULL)
@@ -307,7 +283,6 @@ static int dsa_slave_nway_reset(struct net_device *dev)
 
 static u32 dsa_slave_get_link(struct net_device *dev)
 {
-	printk("ethtool getlint\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 
 	if (p->phy != NULL) {
@@ -320,7 +295,6 @@ static u32 dsa_slave_get_link(struct net_device *dev)
 
 static int dsa_slave_get_eeprom_len(struct net_device *dev)
 {
-	printk("ethtool eepromlen\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -336,7 +310,6 @@ static int dsa_slave_get_eeprom_len(struct net_device *dev)
 static int dsa_slave_get_eeprom(struct net_device *dev,
 				struct ethtool_eeprom *eeprom, u8 *data)
 {
-	printk("ethtool geteepromlen\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -349,7 +322,6 @@ static int dsa_slave_get_eeprom(struct net_device *dev,
 static int dsa_slave_set_eeprom(struct net_device *dev,
 				struct ethtool_eeprom *eeprom, u8 *data)
 {
-	printk("ethtool seteepromlen\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -362,7 +334,6 @@ static int dsa_slave_set_eeprom(struct net_device *dev,
 static void dsa_slave_get_strings(struct net_device *dev,
 				  uint32_t stringset, uint8_t *data)
 {
-	printk("ethtool getstring\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -382,7 +353,6 @@ static void dsa_slave_get_ethtool_stats(struct net_device *dev,
 					struct ethtool_stats *stats,
 					uint64_t *data)
 {
-	printk("ethtool stat\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -396,7 +366,6 @@ static void dsa_slave_get_ethtool_stats(struct net_device *dev,
 
 static int dsa_slave_get_sset_count(struct net_device *dev, int sset)
 {
-	printk("ethtool get sset count\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -415,7 +384,6 @@ static int dsa_slave_get_sset_count(struct net_device *dev, int sset)
 
 static void dsa_slave_get_wol(struct net_device *dev, struct ethtool_wolinfo *w)
 {
-	printk("ethtool get wol\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 
@@ -425,7 +393,6 @@ static void dsa_slave_get_wol(struct net_device *dev, struct ethtool_wolinfo *w)
 
 static int dsa_slave_set_wol(struct net_device *dev, struct ethtool_wolinfo *w)
 {
-	printk("ethtool set wol\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 	int ret = -EOPNOTSUPP;
@@ -438,7 +405,6 @@ static int dsa_slave_set_wol(struct net_device *dev, struct ethtool_wolinfo *w)
 
 static int dsa_slave_set_eee(struct net_device *dev, struct ethtool_eee *e)
 {
-	printk("ethtool set eee\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 	int ret;
@@ -458,7 +424,6 @@ static int dsa_slave_set_eee(struct net_device *dev, struct ethtool_eee *e)
 
 static int dsa_slave_get_eee(struct net_device *dev, struct ethtool_eee *e)
 {
-	printk("ethtool get eee\n");
 	struct dsa_slave_priv *p = netdev_priv(dev);
 	struct dsa_switch *ds = p->parent;
 	int ret;
@@ -710,8 +675,6 @@ dsa_slave_create(struct dsa_switch *ds, struct device *parent,
 	}
 
 	netif_carrier_off(slave_dev);
-
-	p->phy = NULL;
 
 	if (p->phy != NULL) {
 		if (ds->drv->get_phy_flags)
