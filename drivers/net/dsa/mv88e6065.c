@@ -165,7 +165,7 @@ static int mv88e6065_switch_reset(struct dsa_switch *ds)
 static void mv88e6065_setup_priv(struct dsa_switch *ds)
 {
 	struct mv88e6xxx_priv_state *ps = ds_to_priv(ds);
-	
+
 	mutex_init(&ps->smi_mutex);
 	mutex_init(&ps->stats_mutex);
 	mutex_init(&ps->phy_mutex);
@@ -186,14 +186,14 @@ static int mv88e6065_setup_global(struct dsa_switch *ds)
 	 * database size to 1024 entries, and set the default aging
 	 * time to 5 minutes.
 	 */
-	
+
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x0a, 0x2130);
-	
-	
+
+
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x07, 0x0003);
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x08, 0x0003);
-	
-	
+
+
 	return 0;
 }
 
@@ -313,7 +313,7 @@ static void mv88e6065_poll_link(struct dsa_switch *ds)
 			if (port_status < 0)
 				continue;
 
-			link = !!(port_status & 0x1000);
+			link = !!(port_status & 0x2000);
 		}
 
 		if (!link) {
@@ -326,7 +326,10 @@ static void mv88e6065_poll_link(struct dsa_switch *ds)
 
 		speed = (port_status & 0x0100) ? 100 : 10;
 		duplex = (port_status & 0x0200) ? 1 : 0;
-		fc = ((port_status & 0x0010) == 0x0010) ? 1 : 0;
+		if (duplex)
+			fc = ((port_status & 0x0008) == 0x0008) ? 1 : 0;
+		else
+			fc = ((port_status & 0x0004) == 0x0004) ? 1 : 0;
 
 		if (!netif_carrier_ok(dev)) {
 			netdev_info(dev,
@@ -339,17 +342,46 @@ static void mv88e6065_poll_link(struct dsa_switch *ds)
 	}
 }
 
+
+
+static int mv88e6065_rwr(struct dsa_switch *ds, int addr, int reg, int val, int mask){
+	int x = reg_read(ds, addr, reg);
+	printk("%s addr 0x%x:0x%x  reg 0x%x\n",__FUNCTION__, addr, reg, x);
+	x &= mask;
+	if (val & mask)
+		return -EINVAL;
+
+	printk("%s addr 0x%x:0x%x  reg 0x%x\n",__FUNCTION__, addr, reg, x|val);
+	MV88E6065_REG_WRITE(addr, reg,  x | val);
+
+	return 0;
+}
+
+/**
+ * Enable port base vlan
+ * @param enabled_port 1 for enable connect port with port 0, 2 for port 1, 4 for port 2, .... 
+ *   exapmle : mv88e6065_port_base_vlan(ds, port, 0x1f - 4 - (1 < port)); //disable link between port port and port 2
+ *   exapmle : mv88e6065_port_base_vlan(ds, port, 0x1f - 4); //disable link between port port and port 2 with looback
+ */
+static int mv88e6065_port_base_vlan(struct dsa_switch *ds, int port, int enabled_port){
+	/*Disable 802.1Q on port port*/
+	mv88e6065_rwr(ds, port + 0x8, 0x08, 0, 0xf3ff);
+	/*Enable port base VLAN for specific ports*/
+	return mv88e6065_rwr(ds, port + 0x8, 0x06, enabled_port, 0xffe0);
+}
+
 static int mv88e6065_port_enable(struct dsa_switch *ds, int port, struct phy_device *phy)
 {
 	/*PHY reg 100MB full, port normal aneg unchange untagged frames*/
-	MV88E6065_REG_WRITE(port, 0x04, 0x00e1); 
-	MV88E6065_REG_WRITE(port, 0x00, 0x3300); //PHY reg 100MB full, port normal aneg
+	MV88E6065_REG_WRITE(port, 0x04, 0x00e1);
+	MV88E6065_REG_WRITE(port, 0x00, 0x3300);
 	return 0;
 }
 
 static int mv88e6065_port_disable(struct dsa_switch *ds, int port, struct phy_device *phy)
 {
-	MV88E6065_REG_WRITE(port, 0x00, 0x0800); //port down
+	/*Port shutdown*/
+	MV88E6065_REG_WRITE(port, 0x00, 0x0800);
 	return 0;
 }
 
