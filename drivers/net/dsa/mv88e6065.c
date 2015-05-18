@@ -70,6 +70,7 @@ static void nl_recv_msg(struct sk_buff *skb)
 #define MV88E6065_REG_PHY(p)		(0x0 + (p))
 #define MV88E6065_REG_GLOBAL		0xe
 #define MV88E6065_REG_GLOBAL2		0xf
+#define MV88E6065_MAX_PORTS		0x05
 
 static int reg_read(struct dsa_switch *ds, int addr, int reg)
 {
@@ -369,6 +370,39 @@ static int mv88e6065_port_base_vlan(struct dsa_switch *ds, int port, int enabled
 	/*Enable port base VLAN for specific ports*/
 	return mv88e6065_rwr(ds, port + 0x8, 0x06, enabled_port, 0xffe0);
 }
+
+
+
+static int mv88e6065_add_vlan(struct dsa_switch *ds, int vlanid, int ports){
+	int i, portstate1 = 0, portstate2 = 0;
+
+	if (vlanid > 0x0fff)
+		return -EINVAL;
+
+	/*Load or Purge, DBNum 0*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x3000);
+	/*vlan id, Valid bit 1 -> Load op*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, vlanid & 0x1000);
+
+	for (i = 0; i < MV88E6065_MAX_PORTS; i++) {
+		if (ports & (1 < i))
+			if (i < 4)
+				portstate1 = 0xe < (4 * i);
+			else
+				portstate2 = 0xe < (4 * (i-4));
+	}
+	/*Forwarding, Tagged frames or Disabled. umodified frames*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x07, portstate1);
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x08, portstate2);
+}
+
+static int mv88e6065_remove_vlan(struct dsa_switch *ds, int port, int enabled_port){
+	/*Load or Purge, DBNum 0*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x3000);
+	/*vlan id, Valid bit 0 -> Purge op*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, vlanid);
+}
+
 
 static int mv88e6065_port_enable(struct dsa_switch *ds, int port, struct phy_device *phy)
 {
