@@ -555,12 +555,12 @@ static int dsa_slave_phy_setup(struct dsa_slave_priv *p,
 	 * MDIO bus instead
 	 */
 	if (!p->phy) {
-		p->phy = ds->slave_mii_bus->phy_map[p->port];
+/*		p->phy = ds->slave_mii_bus->phy_map[p->port];
 		if (!p->phy)
 			return -ENODEV;
 
 		phy_connect_direct(slave_dev, p->phy, dsa_slave_adjust_link,
-				   p->phy_interface);
+				   p->phy_interface);*/
 	} else {
 		netdev_info(slave_dev, "attached PHY at address %d [%s]\n",
 			    p->phy->addr, p->phy->drv->name);

@@ -28,7 +28,6 @@
 
 struct sock *nl_sk = NULL;
 
-
 static void nl_recv_msg(struct sk_buff *skb)
 {
     struct nlmsghdr *nlh;
@@ -63,6 +62,106 @@ static void nl_recv_msg(struct sk_buff *skb)
         printk(KERN_INFO "Error while sending bak to user\n");
 }
 
+/*Sysfs*/
+#include <linux/kernel.h>
+#include <linux/string.h>
+
+#define to_mv_obj(x) container_of(x, struct mv_priv, kobj)
+#define to_mv_attr(x) container_of(x, struct mv_attribute, attr)
+
+struct mv_ops{
+	int op;
+	int port;
+	int data;
+	int data2;
+};
+struct mv_ops mv_ops;
+
+struct mv_priv{
+	struct kobject *kobj;
+	struct dsa_swich *ds;
+};
+struct mv_priv mv_priv;
+
+struct mv_attribute {
+	struct attribute attr;
+	ssize_t (*show)(struct mv_priv *priv, struct mv_attribute *attr, char *buf);
+	ssize_t (*store)(struct mv_priv *priv, struct mv_attribute *attr, const char *buf, size_t count);
+};
+
+static int mv88e6065_msg_process(struct dsa_switch *ds, const char *buf, size_t count);
+static int mv88e6065_read_all(struct dsa_switch *ds);
+
+
+static ssize_t usb_dsa_store(struct mv_priv *ds,
+		struct mv_attribute *attr, const char *buf, size_t count)
+{
+	printk("Store!!\n");
+	mv88e6065_msg_process(ds->ds, buf, count);
+	return count;
+}
+
+static ssize_t usb_dsa_show(struct mv_priv *ds,
+		struct mv_attribute *attr, char *buf)
+{
+	printk("Read !!\n");
+	printk("Read %x !!\n", ds->ds);
+	mv88e6065_read_all(ds->ds);
+	return scnprintf(buf, PAGE_SIZE, "usb_dsa_binding.\n");
+}
+
+static void driver_release(struct kobject *kobj)
+{
+}
+
+static ssize_t usb_dsa_attr_show(struct kobject *kobj,
+	struct attribute *attr, char *buf)
+{
+	struct mv_attribute *attribute;
+	struct mv_priv *ds;
+
+	attribute = to_mv_attr(attr);
+	ds = to_mv_obj(kobj);
+
+	if (!attribute->show)
+		return -EINVAL;
+
+	return attribute->show(ds, attribute, buf);
+}
+static ssize_t usb_dsa_attr_store(struct kobject *kobj,
+		struct attribute *attr, const char *buf, size_t len)
+{
+	printk("Store1!!\n");
+	struct mv_attribute *attribute;
+	struct mv_priv *ds;
+
+	attribute = to_mv_attr(attr);
+	ds = to_mv_obj(kobj);
+
+	if (!attribute->store)
+		return -EINVAL;
+	return attribute->store(ds, attribute, buf, len);
+}
+
+static struct mv_attribute mv_attribute =  __ATTR(swtichcntrl, 0664, usb_dsa_show, usb_dsa_store);
+static struct attribute *mv_default_attrs[] = {
+	&mv_attribute.attr,
+	NULL,
+};
+static const struct sysfs_ops dsa_bind_sysfs_ops = {
+	.show   = usb_dsa_attr_show,
+	.store  = usb_dsa_attr_store,
+};
+static struct kobj_type mv_bind_ktype = {
+	.sysfs_ops      = &dsa_bind_sysfs_ops,
+	.release        = driver_release,
+	.default_attrs  = mv_default_attrs,
+};
+static struct attribute_group mv_attr_group = {
+        .attrs = mv_default_attrs,
+        .name = "mv88e6065",
+};
+
 #define MV88E6065_GLOBAL_SW_MAC_DIFF_MAC_MASK	0xef
 
 /*Register Address*/
@@ -79,7 +178,9 @@ static int reg_read(struct dsa_switch *ds, int addr, int reg)
 	if (bus == NULL)
 		return -EINVAL;
 
-	return mdiobus_read(bus, ds->pd->sw_addr + addr, reg);
+	int ret = mdiobus_read(bus, ds->pd->sw_addr + addr, reg);
+
+	return ret;
 }
 
 #define MV88E6065_REG_READ(addr, reg)					\
@@ -100,7 +201,9 @@ static int reg_write(struct dsa_switch *ds, int addr, int reg, u16 val)
 	if (bus == NULL)
 		return -EINVAL;
 
-	return mdiobus_write(bus, ds->pd->sw_addr + addr, reg, val);
+	int ret = mdiobus_write(bus, ds->pd->sw_addr + addr, reg, val);
+
+	return ret;
 }
 //
 
@@ -113,6 +216,35 @@ static int reg_write(struct dsa_switch *ds, int addr, int reg, u16 val)
 			return __ret;				\
 	})
 
+static int mv88e6065_rwr(struct dsa_switch *ds, int addr, int reg, int val, int mask){
+	int x = reg_read(ds, addr, reg);
+	printk("%s addr 0x%x:0x%x  reg 0x%x\n",__FUNCTION__, addr, reg, x);
+	x &= mask;
+	if (val & mask)
+		return -EINVAL;
+
+	printk("%s addr 0x%x:0x%x  reg 0x%x\n",__FUNCTION__, addr, reg, x|val);
+	MV88E6065_REG_WRITE(addr, reg,  x | val);
+
+	return 0;
+}
+
+static int mv88e6065_wait(struct dsa_switch *ds, int addr)
+{
+	int ret;
+	int i;
+
+	/*check if stats is not busy*/
+	for (i = 0; i < 10; i++) {
+		ret = reg_read(ds, MV88E6065_REG_GLOBAL, addr);
+		printk("BUSY 0x%x\n", ret);
+		if ((ret & 0x8000) == 0)
+			return 0;
+	}
+
+	printk("BUSYEror GLOABAL 0x%x\n", addr);
+	return -EBUSY;
+}
 static char *mv88e6065_probe(struct device *host_dev, int sw_addr)
 {
 	struct mii_bus *bus = dsa_host_dev_to_mii_bus(host_dev);
@@ -174,8 +306,6 @@ static void mv88e6065_setup_priv(struct dsa_switch *ds)
 }
 
 
-
-//TODO nastaveni pro firmu jinak OK.
 static int mv88e6065_setup_global(struct dsa_switch *ds)
 {
 	/* Disable discarding of frames with excessive collisions,
@@ -183,6 +313,8 @@ static int mv88e6065_setup_global(struct dsa_switch *ds)
 	 * interrupt sources. Counting all frames.
 	 */
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x04, 0x000);
+	/*Enable VTU int*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x04, 0x0030);
 
 	/* Enable automatic address learning, set the address
 	 * database size to 1024 entries, and set the default aging
@@ -194,6 +326,7 @@ static int mv88e6065_setup_global(struct dsa_switch *ds)
 
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x07, 0x0003);
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x08, 0x0003);
+
 
 
 	return 0;
@@ -215,9 +348,12 @@ static int mv88e6065_setup_port(struct dsa_switch *ds, int p)
 	 * state to Forwarding.  Additionally, if this is the CPU
 	 * port, enable Ingress and Egress Trailer tagging mode.
 	 */
-	MV88E6065_REG_WRITE(addr, 0x04, 0x0003);
-	MV88E6065_REG_WRITE(addr, 0x04, 0x100f);
+//	MV88E6065_REG_WRITE(addr, 0x04, 0x0003);
+	MV88E6065_REG_WRITE(addr, 0x04, 0x100f); //engress untagged
+	MV88E6065_REG_WRITE(addr, 0x04, 0x200f); //engress tagged
 
+	MV88E6065_REG_WRITE(addr, 0x06, 0x1f); //map all/all
+	mv88e6065_rwr(ds, addr, 0x08, 0x0400, 0xf0ff); //ingress fallvack, no discarting frames
 	return 0;
 }
 
@@ -245,6 +381,35 @@ static int mv88e6065_setup(struct dsa_switch *ds)
 			return ret;
 	}
 
+	/*Sysfs*/
+	mv_priv.ds = ds;
+
+	mv_priv.kobj = kobject_create_and_add("MV88E6065_SETUP", NULL);
+
+	ret = sysfs_create_group(mv_priv.kobj, &mv_attr_group);
+	if (ret) {
+		printk(KERN_ERR "ksm: register sysfs failed\n");
+		return -ENOMEM;
+	}
+/*	mv_priv.ds = ds;
+	//mv_priv.kobj.kset = kset_create_and_add("MV88E6065_SETUP", NULL, kobject_get(&ds->master_dev.kobj));
+	mv_priv.kobj.kset = NULL;
+	if (!mv_priv.kobj.kset){
+		ret = -ENOMEM;
+		goto free;
+	}
+
+	ret = kobject_init_and_add(&mv_priv.kobj, &mv_bind_ktype, NULL, "setup");
+	if (ret)
+		goto free_kobj;
+
+	return 0;
+
+free_kobj:
+	kobject_put(&mv_priv.kobj);
+free:
+//	kfree(priv);
+	return ret;*/
 	return 0;
 }
 
@@ -293,94 +458,15 @@ mv88e6065_phy_write(struct dsa_switch *ds, int port, int regnum, u16 val)
 	return reg_write(ds, addr, regnum, val);
 }
 
-static void mv88e6065_poll_link(struct dsa_switch *ds)
-{
-	int i;
-	for (i = 0; i < DSA_MAX_PORTS; i++) {
-		struct net_device *dev;
-		int uninitialized_var(port_status);
-		int link;
-		int speed;
-		int duplex;
-		int fc;
-
-		dev = ds->ports[i];
-		if (dev == NULL)
-			continue;
-
-		link = 0;
-		if (dev->flags & IFF_UP) {
-			port_status = reg_read(ds, i + 0x8, 0x00);
-
-			if (port_status < 0)
-				continue;
-
-			link = !!(port_status & 0x2000);
-		}
-
-		if (!link) {
-			if (netif_carrier_ok(dev)) {
-				netdev_info(dev, "link down\n");
-				netif_carrier_off(dev);
-			}
-			continue;
-		}
-
-		speed = (port_status & 0x0100) ? 100 : 10;
-		duplex = (port_status & 0x0200) ? 1 : 0;
-		if (duplex)
-			fc = ((port_status & 0x0008) == 0x0008) ? 1 : 0;
-		else
-			fc = ((port_status & 0x0004) == 0x0004) ? 1 : 0;
-
-		if (!netif_carrier_ok(dev)) {
-			netdev_info(dev,
-				    "link up, %d Mb/s, %s duplex, flow control %sabled\n",
-				    speed,
-				    duplex ? "full" : "half",
-				    fc ? "en" : "dis");
-			netif_carrier_on(dev);
-		}
-	}
-}
 
 
-
-static int mv88e6065_rwr(struct dsa_switch *ds, int addr, int reg, int val, int mask){
-	int x = reg_read(ds, addr, reg);
-	printk("%s addr 0x%x:0x%x  reg 0x%x\n",__FUNCTION__, addr, reg, x);
-	x &= mask;
-	if (val & mask)
-		return -EINVAL;
-
-	printk("%s addr 0x%x:0x%x  reg 0x%x\n",__FUNCTION__, addr, reg, x|val);
-	MV88E6065_REG_WRITE(addr, reg,  x | val);
-
-	return 0;
-}
-
-static int mv88e6065_wait(struct dsa_switch *ds, int addr)
-{
-	int ret;
-	int i;
-
-	/*check if stats is not busy*/
-	for (i = 0; i < 10; i++) {
-		ret = reg_read(ds, MV88E6065_REG_GLOBAL, addr);
-		if ((ret & 0x8000) == 0)
-			return 0;
-	}
-
-	printk("BUSYEror GLOABAL 0x%x\n", addr);
-	return -EBUSY;
-}
 
 
 static int mv88e6065_vtu_read(struct dsa_switch *ds){
 	int ret, i = 0;
 	mv88e6065_wait(ds, 0x05);
 
-/*	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, 0xffff);
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, 0xffff);
 	while(true) {
 		i++;
 		MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x4000 | 0x8000);
@@ -402,48 +488,7 @@ static int mv88e6065_vtu_read(struct dsa_switch *ds){
 			continue;
 		printk("VLAn 0x%x \n", ret);
 	}
-*/
 
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x06, 0x0fff, 0xf000); //ingress fallvack, no discarting frames
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x05, 0xc000, 0x0fff); //ingress fallvack, no discarting frames
-	mv88e6065_wait(ds, 0x05);
-	ret = reg_read(ds, MV88E6065_REG_GLOBAL, 0x06);
-	printk(" 0x%x \n", ret);
-
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x06, 0x0fff, 0xf000); //ingress fallvack, no discarting frames
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x05, 0x430f, 0x0); //ingress fallvack, no discarting frames
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x05, 0x8000, 0x7fff); //ingress fallvack, no discarting frames
-	mv88e6065_wait(ds, 0x05);
-	ret = reg_read(ds, MV88E6065_REG_GLOBAL, 0x06);
-	printk("P 0x%x \n", ret);
-
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x06, 0x0fff, 0xf000); //ingress fallvack, no discarting frames
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x05, 0x430f, 0x0); //ingress fallvack, no discarting frames
-	mv88e6065_rwr(ds, MV88E6065_REG_GLOBAL, 0x05, 0xc30f, 0x0); //ingress fallvack, no discarting frames
-	mv88e6065_wait(ds, 0x05);
-	ret = reg_read(ds, MV88E6065_REG_GLOBAL, 0x06);
-	printk("P 0x%x \n", ret);
-
-
-	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, 0xffff);
-	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x4000 | 0x8000);
-	mv88e6065_wait(ds, 0x05);
-	ret = reg_read(ds, MV88E6065_REG_GLOBAL, 0x06);
-	printk(" 0x%x \n", ret);
-
-	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, 0xfff);
-	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x4000 | 0x8000);
-	mv88e6065_wait(ds, 0x05);
-	ret = reg_read(ds, MV88E6065_REG_GLOBAL, 0x06);
-	printk(" 0x%x \n", ret);
-
-	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, 0xfff);
-	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x4000 | 0x8000);
-	mv88e6065_wait(ds, 0x05);
-	ret = reg_read(ds, MV88E6065_REG_GLOBAL, 0x06);
-	printk(" 0x%x\n ", ret);
-
-	
 	return 0;
 }
 
@@ -460,6 +505,44 @@ static int mv88e6065_port_base_vlan(struct dsa_switch *ds, int port, int enabled
 	return mv88e6065_rwr(ds, port + 0x8, 0x06, enabled_port, 0xffe0);
 }
 
+
+static int mv88e6065_add_vlan_port(struct dsa_switch *ds, int vlanid, int port){
+	int x1, x2, x3, portstate1 = 0, portstate2 = 0;
+	/*TODO get next, read 0x7 0x8 ... add port*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, vlanid - 1 );
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x4000 | 0x8000);
+	mv88e6065_wait(ds, 0x05);
+	portstate1 = reg_read(ds, MV88E6065_REG_GLOBAL, 0x07);
+	portstate2 = reg_read(ds, MV88E6065_REG_GLOBAL, 0x08);
+
+	/*update and write back*/
+	if (port < 4){
+		portstate1 &= (!(0xf < (4*port)));
+		portstate1 |= 0xe << (4 * port);
+	}else{
+		portstate2 &= (!(0xf < (4*(port-4))));
+		portstate2 |= 0xe << (4 * (port-4));
+	}
+	mv88e6065_wait(ds, 0x5);
+
+	printk("ADD vlan 7:%x 8:%x \n", portstate1, portstate2);
+	/*Forwarding, Tagged frames or Disabled. umodified frames*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x08, portstate2);
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x07, portstate1);
+
+	/*vlan id, Valid bit 1 -> Load op*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, vlanid | 0x1000);
+
+	/*Load or Purge, DBNum 0*/
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x3000 | 0x8000);
+
+	mv88e6065_wait(ds, 0x5);
+	x1 = reg_read(ds, MV88E6065_REG_GLOBAL, 0x5);
+	x2 = reg_read(ds, MV88E6065_REG_GLOBAL, 0x6);
+	x3 = reg_read(ds, MV88E6065_REG_GLOBAL, 0x7);
+
+	printk("VLAN ADD %x %x %x\n", x1, x2, x3);
+}
 
 
 static int mv88e6065_add_vlan(struct dsa_switch *ds, int vlanid, int ports){
@@ -488,13 +571,21 @@ static int mv88e6065_add_vlan(struct dsa_switch *ds, int vlanid, int ports){
 
 	/*Forwarding, Tagged frames or Disabled. umodified frames*/
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x08, portstate2);
+		int x = reg_read(ds, MV88E6065_REG_GLOBAL, 0x08);
+		printk("i8 %x\n", x);
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x07, portstate1);
+		x = reg_read(ds, MV88E6065_REG_GLOBAL, 0x07);
+		printk("i7 %x\n", x);
 
 	/*vlan id, Valid bit 1 -> Load op*/
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x06, vlanid | 0x1000);
+		x = reg_read(ds, MV88E6065_REG_GLOBAL, 0x6);
+		printk("i6 %x\n", x);
 
 	/*Load or Purge, DBNum 0*/
-	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x3000 | 0x8000 | 0x1);
+	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x3000 | 0x8000);
+		x = reg_read(ds, MV88E6065_REG_GLOBAL, 0x5);
+		printk("i5 %x\n", x);
 
 	mv88e6065_wait(ds, 0x5);
 	x1 = reg_read(ds, MV88E6065_REG_GLOBAL, 0x5);
@@ -524,29 +615,8 @@ static int mv88e6065_flush_vlan(struct dsa_switch *ds){
 static int mv88e6065_port_enable(struct dsa_switch *ds, int port, struct phy_device *phy)
 {
 	/*PHY reg 100MB full, port normal aneg unchange untagged frames*/
-	MV88E6065_REG_WRITE(port, 0x04, 0x00e1);
-	MV88E6065_REG_WRITE(port, 0x00, 0x3300);
-	if (port == 3){
-		printk("TEST set port\n");
-		MV88E6065_REG_WRITE(2 + 0x8, 0x04, 0x200f); //engress tagged
-		MV88E6065_REG_WRITE(4 + 0x8, 0x04, 0x200f);
-	}
-	if (port == 1){
-		printk("TEST4 read\n");
-		mv88e6065_vtu_read(ds);
-	}
-	if (port == 1){
-		printk("TEST3 flush\n");
-		mv88e6065_flush_vlan(ds);
-	}
-	if (port == 0){
-		printk("TEST2 set vlan\n");
-		MV88E6065_REG_WRITE(2 + 0x8, 0x06, 0x1f); //map all/all
-		MV88E6065_REG_WRITE(4 + 0x8, 0x06, 0x1f);
-		mv88e6065_rwr(ds, 2 + 0x8, 0x08, 0x0400, 0xf0ff); //ingress fallvack, no discarting frames
-		mv88e6065_rwr(ds, 4 + 0x8, 0x08, 0x0400, 0xf0ff);
-		mv88e6065_add_vlan(ds, 0x11, 0x1f);
-	}
+	MV88E6065_REG_WRITE(port, 0x04, 0x01e1);
+	MV88E6065_REG_WRITE(port, 0x00, 0x3300 | 0x8000);
 	return 0;
 }
 
@@ -688,6 +758,201 @@ static int mv88e6065_get_eeprom(struct dsa_switch *ds, struct ethtool_eeprom *ee
 	return 0;
 }
 
+static void mv88e6065_set_cross(struct dsa_switch *ds, int port, int data){
+	if (data == 100){
+		mv88e6065_rwr(ds, port, 0x10, 0x0030, 0xffcf);
+		printk("Port %x cross up\n", port);
+	}else{
+		mv88e6065_rwr(ds, port, 0x10, 0x0000, 0xffcf);
+		printk("Port %x cross down\n", port);
+	}
+}
+
+static void mv88e6065_set_speed(struct dsa_switch *ds, int port, int speed, int dplx){
+	int x = 0, y = 0;
+
+	if (speed == 100){
+		x |= 0xa000;
+		y |= 0x0001;
+	}else{
+		x |= 0x8000;
+		y |= 0x0000;
+	}
+	if (dplx){
+		x |= 0x0100;
+		y |= 0x000c;
+	}else{
+		x |= 0x0000;
+		y |= 0x0004;
+	}
+
+	mv88e6065_rwr(ds, port, 0x00, x, 0x46ff);
+	mv88e6065_rwr(ds, port + 0x8, 0x01, y, 0xfff0);
+
+	//with aneg
+
+	MV88E6065_REG_WRITE(port, 0x00, 0x0800);
+	if (speed == 100){
+		if (dplx)
+			MV88E6065_REG_WRITE(port, 0x04, 0x0101);
+		else
+			MV88E6065_REG_WRITE(port, 0x04, 0x0081);
+
+
+	}else{
+		if (dplx)
+			MV88E6065_REG_WRITE(port, 0x04, 0x0041);
+		else
+			MV88E6065_REG_WRITE(port, 0x04, 0x0021);
+	}
+	MV88E6065_REG_WRITE(port, 0x00, 0x3300 | 0x8000);
+}
+
+static void mv88e6065_set_aneg(struct dsa_switch *ds, int port, int data){
+	if (data){
+		//mv88e6065_rwr(ds, port, 0x00, 0x9300, 0x65ff);
+		mv88e6065_rwr(ds, port + 0x8, 0x01, 0x0003, 0xfff0);
+		/*Port shutdown*/
+		MV88E6065_REG_WRITE(port, 0x00, 0x0800);
+		/*PHY reg 100MB full, port normal aneg unchange untagged frames*/
+		MV88E6065_REG_WRITE(port, 0x04, 0x01e1);
+		MV88E6065_REG_WRITE(port, 0x00, 0x3300 | 0x8000);
+		printk("Port %x aneg on\n", port);
+	}else{
+		mv88e6065_rwr(ds, port, 0x00, 0x8000, 0x67ff);
+		mv88e6065_rwr(ds, port + 0x8, 0x01, 0x0003, 0xfff0);
+		printk("Port %x aneg off\n", port);
+	}
+
+}
+static void mv88e6065_port_state(struct dsa_switch *ds){
+	int i;
+	for (i = 0; i < DSA_MAX_PORTS; i++) {
+		struct net_device *dev;
+		int uninitialized_var(port_status);
+		int link;
+		int speed;
+		int duplex;
+		int fc;
+
+		dev = ds->ports[i];
+		if (dev == NULL)
+			continue;
+
+		link = 0;
+		if (dev->flags & IFF_UP) {
+			port_status = reg_read(ds, i + 0x8, 0x00);
+
+			if (port_status < 0)
+				continue;
+
+			link = !!(port_status & 0x2000);
+		}
+
+		if (!link) {
+			netdev_info(dev, "link down\n");
+			continue;
+		}
+
+		speed = (port_status & 0x0100) ? 100 : 10;
+		duplex = (port_status & 0x0200) ? 1 : 0;
+		if (duplex)
+			fc = ((port_status & 0x0008) == 0x0008) ? 1 : 0;
+		else
+			fc = ((port_status & 0x0004) == 0x0004) ? 1 : 0;
+
+		netdev_info(dev,
+			    "link up, %d Mb/s, %s duplex, flow control %sabled\n",
+			    speed,
+			    duplex ? "full" : "half",
+			    fc ? "en" : "dis");
+	}
+}
+
+static void mv88e6065_poll_link(struct dsa_switch *ds)
+{
+	int i;
+	for (i = 0; i < DSA_MAX_PORTS; i++) {
+		struct net_device *dev;
+		int uninitialized_var(port_status);
+		int uninitialized_var(port_status2);
+		int uninitialized_var(port_status3);
+		int link;
+		int speed;
+		int duplex;
+		int fc;
+
+		dev = ds->ports[i];
+		if (dev == NULL)
+			continue;
+
+		link = 0;
+		if (dev->flags & IFF_UP) {
+//			port_status3 = reg_read(ds, i+0x8 , 0x1);
+//		printk("state1 0x%x\n", port_status3);
+			port_status2 = reg_read(ds, i , 0x11);
+//		printk("phy 0x%x\n", port_status2);
+			port_status = reg_read(ds, i + 0x8, 0x00);
+//		printk("0x%x\n", port_status);
+			if (port_status < 0)
+				continue;
+
+//			link = !!(port_status & 0x2000);
+			link = !!(port_status2 & 0x0400);
+		}
+
+		if (!link) {
+			if (netif_carrier_ok(dev)) {
+				netdev_info(dev, "link down\n");
+				netif_carrier_off(dev);
+			}
+			continue;
+		}
+
+		speed = (port_status & 0x0100) ? 100 : 10;
+		//duplex = (port_status2 & 0x2000) ? 1 : 0;
+		duplex = (port_status & 0x0200) ? 1 : 0;
+		if (duplex)
+			fc = ((port_status & 0x0008) == 0x0008) ? 1 : 0;
+		else
+			fc = ((port_status & 0x0004) == 0x0004) ? 1 : 0;
+
+		if (!netif_carrier_ok(dev)) {
+			netdev_info(dev,
+				    "link up, %d Mb/s, %s duplex, flow control %sabled\n",
+				    speed,
+				    duplex ? "full" : "half",
+				    fc ? "en" : "dis");
+			netif_carrier_on(dev);
+		}
+	}
+
+	switch(mv_ops.op){
+case 1:
+//		mv88e6065_vtu_read(ds);
+		mv88e6065_port_state(ds);
+		break;
+case 2:
+		mv88e6065_flush_vlan(ds);
+		break;
+case 3:
+		mv88e6065_add_vlan(ds, mv_ops.data, 0x1f); //TODO mv88e6065_add_vlan_port
+		break;
+case 4:
+		mv88e6065_set_speed(ds, mv_ops.port, mv_ops.data, mv_ops.data2);
+		break;
+case 5:
+//		mv88e6065_set_dplx(ds, mv_ops.port, mv_ops.data);
+		break;
+case 6:
+		mv88e6065_set_aneg(ds, mv_ops.port, mv_ops.data);
+		break;
+	}
+	mv_ops.op = 0;
+
+	return 0;
+}
+
 struct dsa_switch_driver mv88e6065_switch_driver = {
 	.priv_size		= sizeof(struct mv88e6xxx_priv_state),
 	.tag_protocol	= DSA_TAG_PROTO_TRAILER,
@@ -717,6 +982,7 @@ static struct netlink_kernel_cfg cfg = {
 	.input	= nl_recv_msg,
 };
 
+
 static int __init mv88e6065_init(void)
 {
 	register_switch_driver(&mv88e6065_switch_driver);
@@ -737,8 +1003,79 @@ static void __exit mv88e6065_cleanup(void)
 	unregister_switch_driver(&mv88e6065_switch_driver);
 	/*unregister netlink*/
 	netlink_kernel_release(nl_sk);
+
+	/*Sysfs*/
+//	kset_unregister(mv_priv.kobj.kset);
+//	kobject_put(&mv_priv.kobj);
 }
 module_exit(mv88e6065_cleanup);
+
+/*Sysfs ops*/
+static int mv88e6065_read_all(struct dsa_switch *ds){
+//	mv88e6065_vtu_read(ds);
+	mv_ops.op = 1;
+	return 0;
+}
+/*Sysfs ops*/
+static int mv88e6065_msg_process(struct dsa_switch *ds, const char *buf, size_t count){
+	char *ret, **s, *token;
+	int port , reti;
+	int temp;
+
+	s = &buf;
+	token = strsep(s, " ");
+	reti = kstrtoint(token, 0x10, &port);
+	printk("PORT number: %x\n", port);
+	mv_ops.port = port;
+	
+	ret = strstr(buf, "vlanflush");
+	printk("%s\n", buf);
+	if (ret != NULL)
+		mv_ops.op = 2;
+//		mv88e6065_flush_vlan(ds);
+	
+	ret = strstr(buf, "vlan");
+	printk("%s\n", buf);
+	if (ret != NULL){
+		s = &ret;
+		strsep(s, " ");
+		token = strsep(s, " ");
+		printk("VLAN: %s \n", token);
+		reti = kstrtoint(token, 0x10, &temp);
+		mv_ops.data = temp;
+		mv_ops.op = 3;
+//		mv88e6065_add_vlan(ds, temp, 0x1f); //TODO mv88e6065_add_vlan_port
+	}
+
+	ret = strstr(buf, "speed");
+	if (ret != NULL){
+		s = &ret;
+		strsep(s, " ");
+		token = strsep(s, " ");
+		printk("speed: %s \n", token);
+		reti = kstrtoint(token, 0xa, &temp);
+		mv_ops.data = temp;
+		token = strsep(s, " ");
+		printk("dplx: %s \n", token);
+		reti = kstrtoint(token, 0x10, &temp);
+		mv_ops.data2 = temp;
+		mv_ops.op = 4;
+	//	mv88e6065_set_speed(ds, port, temp);
+	}
+
+	ret = strstr(buf, "aneg");
+	if (ret != NULL){
+		s = &ret;
+		strsep(s, " ");
+		token = strsep(s, " ");
+		printk("aneg: %s \n", token);
+		reti = kstrtoint(token, 0x10, &temp);
+		mv_ops.data = temp;
+		mv_ops.op = 6;
+	//	mv88e6065_set_aneg(ds, port, temp);
+	}
+	return 0;
+}
 
 MODULE_DESCRIPTION("Driver for Marvell 88E6065 ethernet switch chip");
 MODULE_LICENSE("GPL");

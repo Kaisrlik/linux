@@ -368,13 +368,14 @@ out:
 static void dsa_switch_destroy(struct dsa_switch *ds)
 {
 	int i;
-//	for (i = 0; i < DSA_MAX_SWITCHES; i++) {
-//		if (ds->ports[i] == NULL)
-//			continue;
-	for (i = 0; i < 5; i++) {
+	for (i = 0; i < 6; i++) {
+		if (ds->ports[i] == NULL)
+			continue;
 		struct dsa_slave_priv *p = netdev_priv(ds->ports[i]);
-		if (p->phy != NULL)
+		if (p->phy != NULL){
 			phy_disconnect(p->phy);
+			phy_device_free(p->phy);
+		}
 		unregister_netdev(ds->ports[i]);
 	}
 	mdiobus_unregister(ds->slave_mii_bus);
