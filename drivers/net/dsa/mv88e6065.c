@@ -350,7 +350,7 @@ static int mv88e6065_setup_port(struct dsa_switch *ds, int p)
 	 */
 //	MV88E6065_REG_WRITE(addr, 0x04, 0x0003);
 	MV88E6065_REG_WRITE(addr, 0x04, 0x100f); //engress untagged
-	MV88E6065_REG_WRITE(addr, 0x04, 0x200f); //engress tagged
+//	MV88E6065_REG_WRITE(addr, 0x04, 0x200f); //engress tagged
 
 	MV88E6065_REG_WRITE(addr, 0x06, 0x1f); //map all/all
 	mv88e6065_rwr(ds, addr, 0x08, 0x0400, 0xf0ff); //ingress fallvack, no discarting frames
@@ -553,6 +553,7 @@ static int mv88e6065_add_vlan(struct dsa_switch *ds, int vlanid, int ports){
 
 	for (i = 0; i < MV88E6065_MAX_PORTS; i++) {
 		if (ports & (1 << i)){
+				MV88E6065_REG_WRITE(i + 0x8, 0x04, 0x200f); //engress tagged
 			if (i < 4)
 				portstate1 |= 0xe << (4 * i);
 			else
