@@ -110,9 +110,9 @@ static ssize_t usb_dsa_show(struct mv_priv *ds,
 	return scnprintf(buf, PAGE_SIZE, "usb_dsa_binding.\n");
 }
 
-static void driver_release(struct kobject *kobj)
+/*static void driver_release(struct kobject *kobj)
 {
-}
+}*/
 
 static ssize_t usb_dsa_attr_show(struct kobject *kobj,
 	struct attribute *attr, char *buf)
@@ -143,20 +143,74 @@ static ssize_t usb_dsa_attr_store(struct kobject *kobj,
 	return attribute->store(ds, attribute, buf, len);
 }
 
+static ssize_t usb_dsa_store_vlan(struct mv_priv *ds,
+		struct mv_attribute *attr, const char *buf, size_t count)
+{
+	char *ret, **s, *token;
+	int port , reti;
+	int temp;
+
+	s = &buf;
+	token = strsep(s, " ");
+	if (token == NULL)
+		return count;
+
+	reti = kstrtoint(token, 0x10, &port);
+	printk("PORT number: %x\n", port);
+	mv_ops.port = port;
+	
+	ret = strstr(buf, "flush");
+	if (ret != NULL){
+		printk("Flushing VTU\n");
+		mv_ops.op = 2;
+		return count;
+	}
+	
+	ret = strstr(buf, "dvid");
+	if (ret != NULL){
+		printk("Flushing VTU\n");
+		mv_ops.op = 5;
+		return count;
+	}
+
+	token = strsep(s, " ");
+	if (token == NULL)
+		return count;
+
+	printk("VLAN: %s \n", token);
+	reti = kstrtoint(token, 0x10, &temp);
+	mv_ops.data = temp;
+	
+	token = strsep(s, " ");
+	if (token == NULL) {
+		mv_ops.op = 3;
+		return count;
+	}
+
+	printk("VLAN: %s \n", token);
+	reti = kstrtoint(token, 0x10, &temp);
+	mv_ops.data2 = temp;
+	mv_ops.op = 3;
+	
+	return count;
+}
+
 static struct mv_attribute mv_attribute =  __ATTR(swtichcntrl, 0664, usb_dsa_show, usb_dsa_store);
+static struct mv_attribute mv_vlan =  __ATTR(vlan, 0664, NULL, usb_dsa_store_vlan);
 static struct attribute *mv_default_attrs[] = {
 	&mv_attribute.attr,
+	&mv_vlan.attr,
 	NULL,
 };
 static const struct sysfs_ops dsa_bind_sysfs_ops = {
 	.show   = usb_dsa_attr_show,
 	.store  = usb_dsa_attr_store,
 };
-static struct kobj_type mv_bind_ktype = {
+/*static struct kobj_type mv_bind_ktype = {
 	.sysfs_ops      = &dsa_bind_sysfs_ops,
 	.release        = driver_release,
 	.default_attrs  = mv_default_attrs,
-};
+};*/
 static struct attribute_group mv_attr_group = {
         .attrs = mv_default_attrs,
         .name = "mv88e6065",
@@ -457,7 +511,7 @@ mv88e6065_phy_write(struct dsa_switch *ds, int port, int regnum, u16 val)
 }
 
 static int mv88e6065_vtu_read_specific(struct dsa_switch *ds, int vlan){
-	int ret, i = 0;
+	int ret;
 	int data1, data3, data4;
 
 	printk("%s\n", __FUNCTION__);
@@ -546,7 +600,7 @@ static int mv88e6065_add_vlan(struct dsa_switch *ds, int vlanid, int port,
 		int spanningtp, int vlantag)
 {
 	int ret;
-	int i, portstate1 = 0, portstate2 = 0;
+	int portstate1 = 0, portstate2 = 0;
 
 	if (vlanid > 0x0fff)
 		return -EINVAL;
@@ -591,7 +645,8 @@ static int mv88e6065_add_vlan(struct dsa_switch *ds, int vlanid, int port,
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x3000 | 0x8000);
 
 	printk("Vlan 0x%x is added.\n   0x7=0x%x 0x8=0x%x.\n",
-			vlan, portstate1, portstate2);
+			vlanid, portstate1, portstate2);
+	return 0;
 }
 
 
@@ -611,6 +666,8 @@ static int mv88e6065_flush_vlan(struct dsa_switch *ds)
 
 	/*Flush*/
 	MV88E6065_REG_WRITE(MV88E6065_REG_GLOBAL, 0x05, 0x1000 | 0x8000);
+
+	return 0;
 }
 
 static int mv88e6065_port_enable(struct dsa_switch *ds, int port, struct phy_device *phy)
@@ -769,7 +826,7 @@ static void mv88e6065_set_cross(struct dsa_switch *ds, int port, int data){
 	}
 }
 
-static void mv88e6065_set_speed(struct dsa_switch *ds, int port, int speed, int dplx){
+static int mv88e6065_set_speed(struct dsa_switch *ds, int port, int speed, int dplx){
 	int x = 0, y = 0;
 
 	if (speed == 100){
@@ -807,9 +864,11 @@ static void mv88e6065_set_speed(struct dsa_switch *ds, int port, int speed, int 
 			MV88E6065_REG_WRITE(port, 0x04, 0x0021);
 	}
 	MV88E6065_REG_WRITE(port, 0x00, 0x3300 | 0x8000);
+
+	return 0;
 }
 
-static void mv88e6065_set_aneg(struct dsa_switch *ds, int port, int data){
+static int mv88e6065_set_aneg(struct dsa_switch *ds, int port, int data){
 	if (data){
 		//mv88e6065_rwr(ds, port, 0x00, 0x9300, 0x65ff);
 		mv88e6065_rwr(ds, port + 0x8, 0x01, 0x0003, 0xfff0);
@@ -825,6 +884,7 @@ static void mv88e6065_set_aneg(struct dsa_switch *ds, int port, int data){
 		printk("Port %x aneg off\n", port);
 	}
 
+	return 0;
 }
 static void mv88e6065_port_state(struct dsa_switch *ds){
 	int i;
@@ -936,21 +996,22 @@ case 2:
 		mv88e6065_flush_vlan(ds);
 		break;
 case 3:
-		mv88e6065_add_vlan(ds, mv_ops.data, mv_ops.port, 0x0, 0x2);
+		mv88e6065_add_vlan(ds, mv_ops.data, mv_ops.port, 0x0, mv_ops.data2);
 		break;
 case 4:
 		mv88e6065_set_speed(ds, mv_ops.port, mv_ops.data, mv_ops.data2);
 		break;
 case 5:
 //		mv88e6065_set_dplx(ds, mv_ops.port, mv_ops.data);
+		mv88e6065_ds, mv_ops.port, mv_ops.data);
+		mv88e6065_set_default_vlanid(ds, mv_ops.data, mv_ops.port);
+
 		break;
 case 6:
 		mv88e6065_set_aneg(ds, mv_ops.port, mv_ops.data);
 		break;
 	}
 	mv_ops.op = 0;
-
-	return 0;
 }
 
 struct dsa_switch_driver mv88e6065_switch_driver = {
@@ -1023,6 +1084,8 @@ static int mv88e6065_msg_process(struct dsa_switch *ds, const char *buf, size_t 
 
 	s = &buf;
 	token = strsep(s, " ");
+	if (token == NULL)
+		return count;
 	reti = kstrtoint(token, 0x10, &port);
 	printk("PORT number: %x\n", port);
 	mv_ops.port = port;
@@ -1044,6 +1107,8 @@ static int mv88e6065_msg_process(struct dsa_switch *ds, const char *buf, size_t 
 		s = &ret;
 		strsep(s, " ");
 		token = strsep(s, " ");
+		if (token == NULL)
+			return count;
 		printk("VLAN: %s \n", token);
 		reti = kstrtoint(token, 0x10, &temp);
 		mv_ops.data = temp;
@@ -1056,10 +1121,14 @@ static int mv88e6065_msg_process(struct dsa_switch *ds, const char *buf, size_t 
 		s = &ret;
 		strsep(s, " ");
 		token = strsep(s, " ");
+		if (token == NULL)
+			return count;
 		printk("speed: %s \n", token);
 		reti = kstrtoint(token, 0xa, &temp);
 		mv_ops.data = temp;
 		token = strsep(s, " ");
+		if (token == NULL)
+			return count;
 		printk("dplx: %s \n", token);
 		reti = kstrtoint(token, 0x10, &temp);
 		mv_ops.data2 = temp;
@@ -1072,6 +1141,8 @@ static int mv88e6065_msg_process(struct dsa_switch *ds, const char *buf, size_t 
 		s = &ret;
 		strsep(s, " ");
 		token = strsep(s, " ");
+		if (token == NULL)
+			return count;
 		printk("aneg: %s \n", token);
 		reti = kstrtoint(token, 0x10, &temp);
 		mv_ops.data = temp;
